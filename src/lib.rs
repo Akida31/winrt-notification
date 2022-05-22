@@ -37,26 +37,13 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::path::Path;
 use windows::UI::Notifications::ToastActivatedEventArgs;
-use windows::{
-    Data::Xml::Dom::XmlDocument,
-    Foundation::TypedEventHandler,
-    UI::Notifications::ToastNotificationManager,
-};
+use windows::{Data::Xml::Dom::XmlDocument, Foundation::TypedEventHandler, UI::Notifications::ToastNotificationManager};
 
 use xml::escape::escape_str_attribute;
 mod windows_check;
 
-pub use windows::runtime::{
-    Error,
-    IInspectable,
-    Result,
-    HSTRING,
-};
-pub use windows::UI::Notifications::{
-    ToastDismissedEventArgs,
-    ToastFailedEventArgs,
-    ToastNotification,
-};
+pub use windows::runtime::{Error, IInspectable, Result, HSTRING};
+pub use windows::UI::Notifications::{ToastDismissedEventArgs, ToastFailedEventArgs, ToastNotification};
 
 pub struct Toast {
     duration: String,
@@ -69,6 +56,7 @@ pub struct Toast {
     scenario: String,
     inputs: String,
     actions: String,
+    header: String,
 }
 
 type ToastHandler<Inner> = Option<Box<dyn FnMut(&Option<ToastNotification>, &Option<Inner>) -> windows::runtime::Result<()> + Send>>;
@@ -224,6 +212,32 @@ impl Action {
     }
 }
 
+/// Specifies a custom header that groups multiple notifications together within Action Center.
+///
+/// See <https://docs.microsoft.com/en-us/uwp/schemas/tiles/toastschema/element-header>
+#[derive(Debug, Clone, Default)]
+pub struct Header {
+    /// A developer-created identifier that uniquely identifies this header.
+    /// If two notifications have the same header id, they will be displayed underneath the same header in Action Center.
+    id: String,
+    /// A title for the header.
+    title: String,
+    /// A developer-defined string of arguments that is returned to the app when the user clicks this header.
+    arguments: String,
+}
+
+impl Header {
+    /// Create a [`Header`] and set `id` to `title`
+    pub fn from_title<S: ToString>(title: S) -> Self {
+        let title = title.to_string();
+        Self {
+            id: title.clone(),
+            title,
+            arguments: String::new(),
+        }
+    }
+}
+
 impl Toast {
     /// This can be used if you do not have a AppUserModelID.
     ///
@@ -250,6 +264,7 @@ impl Toast {
             scenario: String::new(),
             inputs: String::new(),
             actions: String::new(),
+            header: String::new(),
         }
     }
 
@@ -441,6 +456,17 @@ impl Toast {
         self
     }
 
+    /// Specifies a custom header that groups multiple notifications together within Action Center.
+    pub fn header(mut self, header: Header) -> Toast {
+        self.header = format!(
+            r#"<header id="{}" title="{}" arguments="{}"/>"#,
+            escape_str_attribute(&header.id),
+            escape_str_attribute(&header.title),
+            escape_str_attribute(&header.arguments),
+        );
+        self
+    }
+
     fn create_template(&self) -> windows::runtime::Result<ToastNotification> {
         //using this to get an instance of XmlDocument
         let toast_xml = XmlDocument::new()?;
@@ -460,6 +486,7 @@ impl Toast {
 
         toast_xml.LoadXml(HSTRING::from(format!(
             "<toast {} {}>
+                    {}
                     <visual>
                         <binding template=\"{}\">
                         {}
@@ -474,6 +501,7 @@ impl Toast {
                 </toast>",
             self.duration,
             self.scenario,
+            self.header,
             template_binding,
             self.images,
             self.title,
